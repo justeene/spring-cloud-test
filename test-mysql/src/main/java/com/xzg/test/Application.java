@@ -11,7 +11,6 @@ import org.springframework.context.ApplicationContext;
  * @Description:
  * @date 21-6-8下午3:50
  */
-
 @SpringBootApplication
 public class Application {
     private static final Logger LOGGER = LoggerFactory.getLogger(Application.class);

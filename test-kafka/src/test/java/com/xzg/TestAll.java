@@ -2,11 +2,9 @@ package com.xzg;
 
 import com.github.javafaker.Faker;
 import com.xzg.test.Application;
-import com.xzg.test.dao.StockDao;
-import com.xzg.test.dao.UserDao;
-import com.xzg.test.entity.Stock;
 import com.xzg.test.entity.User;
-import com.xzg.test.service.StockService;
+import com.xzg.test.service.UserService;
+import com.xzg.test.util.JsonUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Before;
 import org.junit.Test;
@@ -24,7 +22,10 @@ import org.springframework.web.context.WebApplicationContext;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author XieZG
@@ -39,11 +40,7 @@ public class TestAll {
     @Autowired
     private WebApplicationContext webApplicationContext;
     @Autowired
-    private StockService stockService;
-    @Autowired
-    private StockDao stockDao;
-    @Autowired
-    private UserDao userDao;
+    private UserService userService;
 
     private MockMvc mockMvc;
 
@@ -52,34 +49,12 @@ public class TestAll {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
     }
 
-    @Test
-    public void testGenerateData() {
-        //中国的使用:
-        Faker fakerWithCN = new Faker(Locale.CHINA);
-        StopWatch stopWatch = new StopWatch();
-        stopWatch.start("生成10万条测试数据");
-        List<User> users = new ArrayList<>(100000);
-        for (int i = 0; i < 100000; i++) {
-            User userInfo = new User();
-            userInfo.setRealName(fakerWithCN.name().fullName());
-            userInfo.setCellPhone(fakerWithCN.phoneNumber().cellPhone());
-            userInfo.setCity(fakerWithCN.address().city());
-            userInfo.setStreet(fakerWithCN.address().streetAddress());
-            userInfo.setUniversityName(fakerWithCN.university().name());
-            users.add(userInfo);
-        }
-        stopWatch.stop();
-        log.info(stopWatch.prettyPrint());
-    }
 
     @Test
-    public void testMysqlTPS() throws InterruptedException {
+    public void testKafka() throws InterruptedException {
         //中国的使用:
         Faker fakerWithCN = new Faker(Locale.CHINA);
-        StopWatch stopWatch = new StopWatch();
-        stopWatch.start("生成10万条测试数据");
-        int count = 100000;
-        List<User> users = new ArrayList<>(count);
+        int count = 1000;
         for (int i = 0; i < count; i++) {
             User userInfo = new User();
             userInfo.setRealName(fakerWithCN.name().fullName());
@@ -87,50 +62,68 @@ public class TestAll {
             userInfo.setCity(fakerWithCN.address().city());
             userInfo.setStreet(fakerWithCN.address().streetAddress());
             userInfo.setUniversityName(fakerWithCN.university().name());
-            users.add(userInfo);
+            String userJson = JsonUtil.writeJson(userInfo);
+            userService.sendToDefaultChannel(userJson);
+        }
+        //等待消息消费完
+        Thread.sleep(500000);
+    }
+
+    @Test
+    public void testKafkaLoop() throws InterruptedException {
+        //中国的使用:
+        Faker fakerWithCN = new Faker(Locale.CHINA);
+        while (true) {
+            User userInfo = new User();
+            userInfo.setRealName(fakerWithCN.name().fullName());
+            userInfo.setCellPhone(fakerWithCN.phoneNumber().cellPhone());
+            userInfo.setCity(fakerWithCN.address().city());
+            userInfo.setStreet(fakerWithCN.address().streetAddress());
+            userInfo.setUniversityName(fakerWithCN.university().name());
+            String userJson = JsonUtil.writeJson(userInfo);
+            userService.sendToDefaultChannel(userJson);
+            Thread.sleep(100);
+        }
+    }
+
+    @Test
+    public void testKafkaThroughput() throws InterruptedException {
+        //中国的使用:
+        Faker fakerWithCN = new Faker(Locale.CHINA);
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("生成10万条测试数据");
+        int count = 100000;
+        List<String> users = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            User userInfo = new User();
+            userInfo.setRealName(fakerWithCN.name().fullName());
+            userInfo.setCellPhone(fakerWithCN.phoneNumber().cellPhone());
+            userInfo.setCity(fakerWithCN.address().city());
+            userInfo.setStreet(fakerWithCN.address().streetAddress());
+            userInfo.setUniversityName(fakerWithCN.university().name());
+            users.add(JsonUtil.writeJson(userInfo));
         }
         stopWatch.stop();
         log.info("生成数据速度：{}", count * 1000.0 / stopWatch.getLastTaskTimeMillis());
-        stopWatch.start("开始插入数据");
-        int threadSize = 100;
+        stopWatch.start("开始发送100万消息");
+
+        int threadSize = 10;
         ExecutorService cachedThreadPool = new ThreadPoolExecutor(threadSize, threadSize, 0, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(threadSize * 10), // 使用有界队列，避免OOM
                 new CallerBlocksPolicy(3600 * 1000));//队列满了阻塞队列，超时未入队抛异常
-        for (User user : users) {
+        for (int i = 0; i < count * 10; i++) {
+            String userJson = users.get(i % count);
             cachedThreadPool.execute(() -> {
-                userDao.save(user);
+                userService.sendToDefaultChannel(userJson);
             });
         }
         cachedThreadPool.shutdown();
         cachedThreadPool.awaitTermination(1, TimeUnit.HOURS);
         stopWatch.stop();
-        log.info("插入数据速度：{}", count * 1000.0 / stopWatch.getLastTaskTimeMillis());
+        log.info("发送100万消息速度：{}", count * 10 * 1000.0 / stopWatch.getLastTaskTimeMillis());
         stopWatch.getLastTaskTimeMillis();
         log.info(stopWatch.prettyPrint());
     }
 
 
-    @Test
-    public void testBuy() throws Exception {
-        long size = 1000;
-        stockService.addStock(Stock.builder()
-                .id(1L)
-                .name("shoes")
-                .count(size)
-                .build());
-        ExecutorService cachedThreadPool = Executors.newCachedThreadPool();
-        for (int i = 0; i < size; i++) {
-            cachedThreadPool.execute(() -> {
-                stockService.buy(1L);
-            });
-        }
-        cachedThreadPool.shutdown();
-        cachedThreadPool.awaitTermination(1, TimeUnit.HOURS);
-        log.info("stock count:{}", stockDao.findById(1L).get().getCount());
-        assert stockDao.findById(1L).get().getCount().intValue() == 0;
-
-//        mockMvc.perform(MockMvcRequestBuilders.get(new URI("/buy")))
-//                .andExpect(MockMvcResultMatchers.status().isOk())
-//                .andDo(MockMvcResultHandlers.print());
-    }
 }
