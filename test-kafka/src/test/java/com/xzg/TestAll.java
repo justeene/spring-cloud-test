@@ -125,6 +125,7 @@ public class TestAll {
         log.info(stopWatch.prettyPrint());
     }
 
+
     @Test
     public void testBudRiskKafkaTps() throws InterruptedException {
         //中国的使用:
@@ -151,7 +152,7 @@ public class TestAll {
             risk.put("tradeType", "scancode_lottery");
             risk.put("tradeTypeName", "扫码开奖");
             risk.put("accountMobile", phone);
-            risk.put("customerName", fakerWithCN.address());
+            risk.put("customerName", fakerWithCN.address().fullAddress());
             risk.put("openId", "oJ9wc5EYSzaCgEROr8h40utK1GxY");
             risk.put("gps", longitude + "," + latitude);
             risk.put("SKU", "百威9.7度500听装-54552/54553/62565/71140");
